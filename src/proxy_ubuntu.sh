@@ -385,18 +385,49 @@ prompt_proxy_count() {
   done
 }
 
+# Lấy IP public từ nhiều nguồn, tránh lỗi dịch vụ ngoài
+fetch_public_ip() {
+  local curl_flag=$1
+  shift
+  local endpoint
+  local ip=""
+  for endpoint in "$@"; do
+    if ip=$(curl "$curl_flag" -fsS --max-time 5 "$endpoint" 2>/dev/null); then
+      ip=$(echo "$ip" | tr -d '\r' | tr -d '\n')
+      if [[ -n "$ip" ]]; then
+        echo "$ip"
+        return 0
+      fi
+    fi
+  done
+  echo ""
+  return 1
+}
+
 collect_network_info() {
   PRIMARY_IPV4=$(ip -4 addr show scope global up | awk '/inet / {print $2}' | cut -d'/' -f1 | head -n1)
   PRIMARY_IPV6=$(ip -6 addr show scope global up | awk '/inet6 / && $2 !~ /fe80/ {print $2}' | cut -d'/' -f1 | head -n1)
-  PUBLIC_IPV4=$(curl -4 -fsS --max-time 5 https://ifconfig.io || echo "$PRIMARY_IPV4")
-  PUBLIC_IPV6=$(curl -6 -fsS --max-time 5 https://ifconfig.io || echo "$PRIMARY_IPV6")
   if [[ -z "$PRIMARY_IPV4" ]]; then
     fatal "Không tìm thấy IPv4 public."
   fi
-  if [[ -z "$PRIMARY_IPV6" ]]; then
-    log_warn "Không tìm thấy IPv6 global."
+  local ipv4_sources=(https://ifconfig.io https://api.ipify.org https://ipv4.icanhazip.com)
+  PUBLIC_IPV4=$(fetch_public_ip -4 "${ipv4_sources[@]}")
+  if [[ -z "$PUBLIC_IPV4" ]]; then
+    PUBLIC_IPV4="$PRIMARY_IPV4"
+    log_warn "Không truy vấn được IPv4 public qua dịch vụ ngoài, dùng IP cục bộ."
   fi
-}
+  if [[ -n "$PRIMARY_IPV6" ]]; then
+    local ipv6_sources=(https://ifconfig.io https://api64.ipify.org https://ipv6.icanhazip.com)
+    PUBLIC_IPV6=$(fetch_public_ip -6 "${ipv6_sources[@]}")
+    if [[ -z "$PUBLIC_IPV6" ]]; then
+      PUBLIC_IPV6="$PRIMARY_IPV6"
+        log_warn "Không truy vấn được IPv6 public qua dịch vụ ngoài, dùng IP cục bộ."
+      fi
+    else
+      PUBLIC_IPV6=""
+      log_warn "Không tìm thấy IPv6 global."
+    fi
+  }
 
 generate_token() {
   if command_exists openssl; then
