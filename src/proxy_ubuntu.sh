@@ -1,8 +1,8 @@
+cat << 'EOF' > auto_proxy.sh
 #!/bin/bash
 
 # ==========================================
 # Script Auto Create Proxy with 3proxy
-# Environment: Ubuntu Server (aaPanel Compatible)
 # ==========================================
 
 WORKDIR="/root/proxy_setup"
@@ -35,7 +35,6 @@ if [ ! -f "$PROXY_EXEC" ]; then
     echo "[+] Đang tải và cài đặt 3proxy..."
     mkdir -p $WORKDIR
     cd $WORKDIR
-    # Download stable version
     wget https://github.com/z3APA3A/3proxy/archive/0.9.4.tar.gz > /dev/null 2>&1
     tar -xzvf 0.9.4.tar.gz > /dev/null 2>&1
     cd 3proxy-0.9.4
@@ -43,8 +42,7 @@ if [ ! -f "$PROXY_EXEC" ]; then
     make -f Makefile.Linux install > /dev/null 2>&1
     echo "[ok] Cài đặt 3proxy hoàn tất."
 else
-    echo "[!] 3proxy đã được cài đặt. Tiến hành cấu hình lại..."
-    # Stop service if running
+    echo "[!] 3proxy đã cài đặt. Đang reset cấu hình..."
     systemctl stop 3proxy 2>/dev/null
     killall 3proxy 2>/dev/null
 fi
@@ -52,105 +50,91 @@ fi
 # --- 5. User Inputs ---
 echo "------------------------------------------------"
 echo "THÔNG TIN MÁY CHỦ:"
-echo "- IPv4 hiện tại: ${IPV4_ADDR:-"Không tìm thấy"}"
-echo "- IPv6 hiện tại: ${IPV6_ADDR:-"Không tìm thấy"}"
+echo "- IPv4: ${IPV4_ADDR:-"Không có"}"
+echo "- IPv6: ${IPV6_ADDR:-"Không có"}"
 echo "------------------------------------------------"
 
-# Select IP Version
-PS3='Chọn phiên bản IP để tạo Proxy: '
+PS3='Chọn IP để tạo Proxy (Nhập 1 hoặc 2): '
 options=("IPv4" "IPv6" "Thoát")
 select opt in "${options[@]}"
 do
     case $opt in
         "IPv4")
-            if [ -z "$IPV4_ADDR" ]; then echo "Lỗi: Không tìm thấy IPv4!"; exit 1; fi
+            if [ -z "$IPV4_ADDR" ]; then echo "Lỗi: Không có IPv4!"; exit 1; fi
             SELECTED_IP=$IPV4_ADDR
             IP_TYPE="4"
             break
             ;;
         "IPv6")
-            if [ -z "$IPV6_ADDR" ]; then echo "Lỗi: Không tìm thấy IPv6!"; exit 1; fi
+            if [ -z "$IPV6_ADDR" ]; then echo "Lỗi: Không có IPv6!"; exit 1; fi
             SELECTED_IP=$IPV6_ADDR
             IP_TYPE="6"
             break
             ;;
-        "Thoát")
-            exit 0
-            ;;
-        *) echo "Lựa chọn không hợp lệ $REPLY";;
+        "Thoát") exit 0 ;;
+        *) echo "Vui lòng chọn 1, 2 hoặc 3.";;
     esac
 done
 
-# Calculate Max Proxies (Based on generic port limits, not RAM)
-# 65535 ports total, reserving first 10000 for system
 MAX_PROXY=5000
-echo "[*] Hệ thống cho phép tạo tối đa khoảng $MAX_PROXY proxy an toàn."
-
-# Input Quantity
 while true; do
-    read -p "Nhập số lượng proxy cần tạo (Ví dụ: 10): " PROXY_COUNT
+    read -p "Nhập số lượng proxy (1-$MAX_PROXY): " PROXY_COUNT
     if [[ "$PROXY_COUNT" =~ ^[0-9]+$ ]] && [ "$PROXY_COUNT" -gt 0 ] && [ "$PROXY_COUNT" -le "$MAX_PROXY" ]; then
         break
     else
-        echo "Vui lòng nhập số hợp lệ (1 - $MAX_PROXY)."
+        echo "Số lượng không hợp lệ."
     fi
 done
 
-# Input Starting Port
 DEFAULT_PORT=10000
-read -p "Nhập port bắt đầu (Enter để dùng mặc định $DEFAULT_PORT): " START_PORT
+read -p "Nhập port bắt đầu (Enter để dùng $DEFAULT_PORT): " START_PORT
 START_PORT=${START_PORT:-$DEFAULT_PORT}
 
 # --- 6. Generate Config ---
-echo "[+] Đang tạo cấu hình proxy..."
+echo "[+] Đang tạo cấu hình..."
 mkdir -p $CFG_PATH
-cat > $CFG_PATH/3proxy.cfg <<EOF
+# Tạo file config cơ bản
+cat > $CFG_PATH/3proxy.cfg <<CONFIG
 daemon
-maxconn 1000
+maxconn 2000
 nscache 65536
 timeouts 1 5 30 60 180 1800 15 60
 setgid 65535
 setuid 65535
 flush
 auth strong
-users $(awk -v count=$PROXY_COUNT 'BEGIN { for (i=1; i<=count; i++) printf "user" i ":CL:pass" i " " }')
 allow *
-EOF
+CONFIG
 
-# Clear old output file
+# Xóa file output cũ
 > $OUTPUT_FILE
 
-# Generate Users, Ports and append to config
-# Loop to create config entries
+# Loop tạo user và port
 for (( i=1; i<=PROXY_COUNT; i++ ))
 do
     CURRENT_PORT=$((START_PORT + i - 1))
     RAND_USER="u$(tr -dc a-z0-9 </dev/urandom | head -c 6)"
     RAND_PASS="$(tr -dc A-Za-z0-9 </dev/urandom | head -c 10)"
     
-    # Add user to config (Append to top or create specific allow rule logic)
-    # Re-writing config specific specifically for this logic to be simpler:
-    
-    # We add the user auth line
+    # Thêm user vào config
     echo "users $RAND_USER:CL:$RAND_PASS" >> $CFG_PATH/3proxy.cfg
     
-    # Add proxy binding
+    # Thêm proxy binding vào config
     if [ "$IP_TYPE" == "6" ]; then
         echo "proxy -6 -n -a -p$CURRENT_PORT -i$SELECTED_IP -e$SELECTED_IP" >> $CFG_PATH/3proxy.cfg
     else
         echo "proxy -n -a -p$CURRENT_PORT -i$SELECTED_IP -e$SELECTED_IP" >> $CFG_PATH/3proxy.cfg
     fi
     
-    # Save to output file
+    # Lưu ra file
     echo "$SELECTED_IP:$CURRENT_PORT:$RAND_USER:$RAND_PASS" >> $OUTPUT_FILE
     
-    # Open Firewall (UFW)
+    # Mở port firewall
     ufw allow $CURRENT_PORT/tcp > /dev/null 2>&1
 done
 
-# --- 7. Create Systemd Service ---
-echo "[+] Đang cấu hình tự động khởi chạy (Systemd)..."
-cat > /etc/systemd/system/3proxy.service <<EOF
+# --- 7. Systemd Service ---
+cat > /etc/systemd/system/3proxy.service <<SERVICE
 [Unit]
 Description=3proxy Proxy Server
 After=network.target
@@ -164,18 +148,18 @@ LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SERVICE
 
 systemctl daemon-reload
 systemctl enable 3proxy > /dev/null 2>&1
 systemctl restart 3proxy
 
-# --- 8. Finish ---
 echo "------------------------------------------------"
-echo "HOÀN TẤT!"
-echo "Đã tạo thành công $PROXY_COUNT proxies."
-echo "Danh sách đã được lưu tại: $OUTPUT_FILE"
+echo "HOÀN TẤT! Đã tạo $PROXY_COUNT proxies."
+echo "File lưu tại: $OUTPUT_FILE"
 echo "------------------------------------------------"
-echo "Nội dung 10 dòng đầu tiên của file kết quả:"
-head -n 10 $OUTPUT_FILE
+head -n 5 $OUTPUT_FILE
 echo "..."
+EOF
+chmod +x auto_proxy.sh
+./auto_proxy.sh
