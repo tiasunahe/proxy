@@ -1,4 +1,3 @@
-cat << 'EOF' > auto_proxy.sh
 #!/bin/bash
 
 # ==========================================
@@ -22,6 +21,7 @@ echo "------------------------------------------------"
 
 # --- 2. Install Dependencies ---
 echo "[+] Đang kiểm tra và cài đặt thư viện cần thiết..."
+# Sửa lỗi trôi lệnh: Đảm bảo output của apt-get không làm nhiễu console
 apt-get update -y > /dev/null 2>&1
 apt-get install -y build-essential gcc make git wget curl net-tools jq ufw > /dev/null 2>&1
 
@@ -54,25 +54,27 @@ echo "- IPv4: ${IPV4_ADDR:-"Không có"}"
 echo "- IPv6: ${IPV6_ADDR:-"Không có"}"
 echo "------------------------------------------------"
 
-PS3='Chọn IP để tạo Proxy (Nhập 1 hoặc 2): '
-options=("IPv4" "IPv6" "Thoát")
-select opt in "${options[@]}"
-do
-    case $opt in
-        "IPv4")
+# Dùng lệnh read thay cho select để tránh lỗi trôi lệnh
+while true; do
+    echo "1) IPv4"
+    echo "2) IPv6"
+    echo "3) Thoát"
+    read -p "Chọn IP để tạo Proxy (Nhập 1, 2 hoặc 3): " CHOICE
+    case $CHOICE in
+        1)
             if [ -z "$IPV4_ADDR" ]; then echo "Lỗi: Không có IPv4!"; exit 1; fi
             SELECTED_IP=$IPV4_ADDR
             IP_TYPE="4"
             break
             ;;
-        "IPv6")
+        2)
             if [ -z "$IPV6_ADDR" ]; then echo "Lỗi: Không có IPv6!"; exit 1; fi
             SELECTED_IP=$IPV6_ADDR
             IP_TYPE="6"
             break
             ;;
-        "Thoát") exit 0 ;;
-        *) echo "Vui lòng chọn 1, 2 hoặc 3.";;
+        3) exit 0 ;;
+        *) echo "Lựa chọn không hợp lệ. Vui lòng chọn 1, 2 hoặc 3.";;
     esac
 done
 
@@ -93,7 +95,6 @@ START_PORT=${START_PORT:-$DEFAULT_PORT}
 # --- 6. Generate Config ---
 echo "[+] Đang tạo cấu hình..."
 mkdir -p $CFG_PATH
-# Tạo file config cơ bản
 cat > $CFG_PATH/3proxy.cfg <<CONFIG
 daemon
 maxconn 2000
@@ -106,34 +107,29 @@ auth strong
 allow *
 CONFIG
 
-# Xóa file output cũ
 > $OUTPUT_FILE
 
-# Loop tạo user và port
 for (( i=1; i<=PROXY_COUNT; i++ ))
 do
     CURRENT_PORT=$((START_PORT + i - 1))
     RAND_USER="u$(tr -dc a-z0-9 </dev/urandom | head -c 6)"
     RAND_PASS="$(tr -dc A-Za-z0-9 </dev/urandom | head -c 10)"
     
-    # Thêm user vào config
     echo "users $RAND_USER:CL:$RAND_PASS" >> $CFG_PATH/3proxy.cfg
     
-    # Thêm proxy binding vào config
     if [ "$IP_TYPE" == "6" ]; then
         echo "proxy -6 -n -a -p$CURRENT_PORT -i$SELECTED_IP -e$SELECTED_IP" >> $CFG_PATH/3proxy.cfg
     else
         echo "proxy -n -a -p$CURRENT_PORT -i$SELECTED_IP -e$SELECTED_IP" >> $CFG_PATH/3proxy.cfg
     fi
     
-    # Lưu ra file
     echo "$SELECTED_IP:$CURRENT_PORT:$RAND_USER:$RAND_PASS" >> $OUTPUT_FILE
     
-    # Mở port firewall
     ufw allow $CURRENT_PORT/tcp > /dev/null 2>&1
 done
 
 # --- 7. Systemd Service ---
+echo "[+] Đang cấu hình tự động khởi chạy (Systemd)..."
 cat > /etc/systemd/system/3proxy.service <<SERVICE
 [Unit]
 Description=3proxy Proxy Server
@@ -154,12 +150,10 @@ systemctl daemon-reload
 systemctl enable 3proxy > /dev/null 2>&1
 systemctl restart 3proxy
 
+# --- 8. Finish ---
 echo "------------------------------------------------"
 echo "HOÀN TẤT! Đã tạo $PROXY_COUNT proxies."
 echo "File lưu tại: $OUTPUT_FILE"
 echo "------------------------------------------------"
 head -n 5 $OUTPUT_FILE
 echo "..."
-EOF
-chmod +x auto_proxy.sh
-./auto_proxy.sh
