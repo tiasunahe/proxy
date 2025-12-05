@@ -8,9 +8,14 @@ set -e
 # Hàm kiểm tra và cài đặt 3proxy nếu chưa có
 install_3proxy() {
     if ! command -v 3proxy &> /dev/null; then
-        echo "Cài đặt 3proxy..."
+        echo "Cài đặt 3proxy từ source..."
         apt update
-        apt install -y 3proxy
+        apt install -y build-essential git
+        git clone https://github.com/z3APA3A/3proxy.git /tmp/3proxy
+        cd /tmp/3proxy
+        make
+        make install
+        mkdir -p /etc/3proxy
     else
         echo "3proxy đã được cài đặt."
     fi
@@ -21,6 +26,11 @@ generate_credentials() {
     local user="user$(shuf -i 1000-9999 -n 1)"
     local pass="pass$(shuf -i 1000-9999 -n 1)"
     echo "$user:$pass"
+}
+
+# Hàm lấy IP của server
+get_ip() {
+    curl -s ifconfig.me
 }
 
 # Hàm kiểm tra số lượng proxy tối đa có thể tạo
@@ -37,6 +47,7 @@ create_proxy() {
     local ip_version=$2
     local config_file="/etc/3proxy/3proxy.cfg"
     local output_file="proxies.txt"
+    local ip=$(get_ip)
 
     # Sao lưu config cũ nếu có
     if [ -f "$config_file" ]; then
@@ -57,7 +68,7 @@ create_proxy() {
         local pass=$(echo $creds | cut -d: -f2)
         echo "users $user:CL:$pass" >> "$config_file"
         echo "socks -p$port -i0.0.0.0 -u$user" >> "$config_file"
-        echo "127.0.0.1:$port:$user:$pass" >> "$output_file"
+        echo "$ip:$port:$user:$pass" >> "$output_file"
         ((port++))
     done
 
