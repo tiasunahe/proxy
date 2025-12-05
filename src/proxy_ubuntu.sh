@@ -329,24 +329,28 @@ prompt_ip_version() {
     if ((has_ipv6)); then
       read -rp "Chọn loại proxy [4-IPv4 / 6-IPv6] (mặc định 4): " selection
       selection=${selection:-4}
-      case "$selection" in
-        4)
-          IP_VERSION="ipv4"
-          return
-          ;;
-        6)
+    else
+      log_warn "Không phát hiện IPv6 global. Chỉ có thể tạo proxy IPv4."
+      read -rp "Nhập 4 để tiếp tục với IPv4 (mặc định 4): " selection
+      selection=${selection:-4}
+    fi
+    case "$selection" in
+      4)
+        IP_VERSION="ipv4"
+        return
+        ;;
+      6)
+        if ((has_ipv6)); then
           IP_VERSION="ipv6"
           return
-          ;;
-        *)
-          log_warn "Lựa chọn không hợp lệ."
-          ;;
-      esac
-    else
-      log_warn "Không phát hiện IPv6 global. Sử dụng IPv4."
-      IP_VERSION="ipv4"
-      return
-    fi
+        else
+          log_warn "Máy chủ không có IPv6 global. Vui lòng chọn 4."
+        fi
+        ;;
+      *)
+        log_warn "Lựa chọn không hợp lệ."
+        ;;
+    esac
   done
 }
 
